@@ -1,0 +1,15 @@
+*.obj
+*.exe
+*.log
+*.tmp
+/build/
+*.o
+*.class
+*.pyc
+.DS_Store
+.vscode/
+
+
+*.ilk
+*.pdb
+*.py
