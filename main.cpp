@@ -419,6 +419,150 @@ PredictionResult model_predict(ModelParameters params, const Eigen::MatrixXd& X,
     return result;
 }
 
+// Begin setup for Multi-Category Neural Net:
+
+std::pair<Eigen::MatrixXd, Eigen::MatrixXd> relu(const Eigen::MatrixXd& Z){
+    /*
+    Computes relu activation of input Z
+    
+    Inputs: 
+        Z: numpy.ndarray (n, m) which represent 'm' samples each of 'n' dimension
+        
+    Outputs: 
+        A: where A = ReLU(Z) is a numpy.ndarray (n, m) representing 'm' samples each of 'n' dimension
+        cache: a dictionary with {"Z", Z}
+    */
+    
+    Eigen::MatrixXd A = Z.cwiseMax(0.0);
+    Eigen::MatrixXd cache;
+    cache = Z;
+    return {A, cache};
+}
+
+// ReLU Gradient:
+Eigen::MatrixXd relu_der(const Eigen::MatrixXd& dA, const Eigen::MatrixXd& cache){
+    /*
+    Computes derivative of relu activation
+    
+    Inputs: 
+        dA: derivative from the subsequent layer of dimension (n, m). 
+            dA is multiplied elementwise with the gradient of ReLU
+        cache: dictionary with {"Z", Z}, where Z was the input 
+            to the activation layer during forward propagation
+        
+    Outputs: 
+        dZ: the derivative of dimension (n,m). It is the elementwise 
+            product of the derivative of ReLU and dA
+    */
+    Eigen::MatrixXd Z = cache;
+    Eigen::MatrixXd dZ = dA;
+    dZ = dZ.array() * (Z.array() > 0).cast<double>();
+    return dZ;
+}
+
+// Linear Activation: Linear(Z) = Z
+std::pair<Eigen::MatrixXd, Eigen::MatrixXd> linear(const Eigen::MatrixXd& Z){
+    /*
+    Computes linear activation of Z
+    This function is implemented for completeness
+        
+    Inputs: 
+        Z: numpy.ndarray (n, m) which represent 'm' samples each of 'n' dimension
+        
+    Outputs: 
+        A: where A = Linear(Z) is a numpy.ndarray (n, m) representing 'm' samples each of 'n' dimension
+        cache: a dictionary with {"Z", Z}  
+    */
+    Eigen::MatrixXd A = Z;
+    Eigen::MatrixXd cache = Z;
+    return {A, cache};
+}
+
+// Linear Activation Gradient:
+Eigen::MatrixXd linear_der(const Eigen::MatrixXd& dA,const Eigen::MatrixXd& cache){
+    /*
+    Computes derivative of linear activation
+    This function is implemented for completeness
+    
+    Inputs: 
+        dA: derivative from the subsequent layer of dimension (n, m). 
+            dA is multiplied elementwise with the gradient of Linear(.)
+        cache: dictionary with {"Z", Z}, where Z was the input 
+            to the activation layer during forward propagation
+        
+    Outputs: 
+        dZ: the derivative of dimension (n,m). It is the elementwise 
+            product of the derivative of Linear(.) and dA
+    */
+
+    Eigen::MatrixXd dZ = dA;
+    return dZ;
+}
+
+
+//Softmax Cross Entropy Loss:
+
+struct SoftCrossEntropyLoss{
+    Eigen::MatrixXd A;
+    Eigen::MatrixXd cache;
+    double loss;
+};
+
+SoftCrossEntropyLoss softmax_cross_entropy_loss(const Eigen::MatrixXd& Z, const Eigen::MatrixXd& Y = Eigen::MatrixXd()){
+    /*
+    Computes the softmax activation of the inputs Z
+    Estimates the cross entropy loss
+
+    Inputs: 
+        Z: numpy.ndarray (n, m)
+        Y: numpy.ndarray (1, m) of labels
+            when y=[] loss is set to []
+    
+    Outputs:
+        A: numpy.ndarray (n, m) of softmax activations
+        cache: a dictionary to store the activations which will be used later to estimate derivatives
+        loss: cost of prediction
+    */
+    
+    
+    long n = Z.rows(); // number of classes
+    long m = Z.cols(); // number of samples
+    Eigen::MatrixXd exp_Z = Z.array().exp();
+    Eigen::MatrixXd A = exp_Z.array().rowwise() / exp_Z.colwise().sum().array();
+    SoftCrossEntropyLoss result;
+    result.A = A;
+    result.cache = A;
+    result.loss = 0.0;
+
+    if(Y.size() > 0){
+        Eigen::MatrixXd logA = A.array().log();
+        double sum = (Y.array() * logA.array()).sum();
+        result.loss = -(1.0 / m) * sum;
+    } else {
+        result.loss = std::numeric_limits<double>::infinity();
+    }
+
+    return result;
+}
+
+
+Eigen::MatrixXd softmax_cross_entropy_loss_der(const Eigen::MatrixXd& Y, const Eigen::MatrixXd& cache){
+    /*
+    Computes the derivative of the softmax activation and cross entropy loss
+
+    Inputs: 
+        Y: numpy.ndarray (1, m) of labels
+        cache: a dictionary with cached activations A of size (n,m)
+
+    Outputs:
+        dZ: derivative dL/dZ - a numpy.ndarray of dimensions (n, m) 
+    */
+    Eigen::MatrixXd A = cache;
+    long m = Y.cols(); // number of samples
+    Eigen::MatrixXd dZ = (A - Y) / m;
+    return dZ;
+}
+
 
 
 int main() {
