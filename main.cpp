@@ -36,6 +36,13 @@ struct PredictionResult {
     double loss;
 };
 
+//Struct to hold softmax cross entropy loss:
+struct SoftCrossEntropyLoss{
+    Eigen::MatrixXd A;
+    Eigen::MatrixXd cache;
+    double loss;
+};
+
 
 // --------------- Functions ----------------- //
 
@@ -250,7 +257,7 @@ std::vector<double> k_fold_cv(int k_fold, const Eigen::MatrixXd& train_X, const 
     return rmse_list;
 }
 
-std::pair<Eigen::MatrixXd, double> initialize(int d, int seed = 1){
+std::pair<Eigen::MatrixXd, double> initialize1(int d, int seed = 1){
     std::mt19937 gen(seed);
     std::normal_distribution<double> dist(0.0, 1.0);
     Eigen::MatrixXd w(d, 1);
@@ -502,11 +509,7 @@ Eigen::MatrixXd linear_der(const Eigen::MatrixXd& dA,const Eigen::MatrixXd& cach
 
 //Softmax Cross Entropy Loss:
 
-struct SoftCrossEntropyLoss{
-    Eigen::MatrixXd A;
-    Eigen::MatrixXd cache;
-    double loss;
-};
+
 
 SoftCrossEntropyLoss softmax_cross_entropy_loss(const Eigen::MatrixXd& Z, const Eigen::MatrixXd& Y = Eigen::MatrixXd()){
     /*
@@ -563,46 +566,92 @@ Eigen::MatrixXd softmax_cross_entropy_loss_der(const Eigen::MatrixXd& Y, const E
     return dZ;
 }
 
+struct parameters {
+    Eigen::MatrixXd W;
+    Eigen::MatrixXd b;
+};
+
+// Init multi-layer NN:
+parameters initialize_network(const std::vector<int>& net_dims) {
+    /*
+    Initializes the parameters of a multi-layer neural network
+    
+    Inputs:
+        net_dims: List containing the dimensions of the network. The values of the array represent the number of nodes in 
+        each layer. For Example, if a Neural network contains 784 nodes in the input layer, 800 in the first hidden layer, 
+        500 in the secound hidden layer and 10 in the output layer, then net_dims = [784,800,500,10]. 
+    
+    Outputs:
+        parameters: Python Dictionary for storing the Weights and bias of each layer of the network
+    */
+    std::mt19937 gen(42);
+    
+
+    int numLayers = net_dims.size();
+    parameters params;
+    //std::cout << numLayers << std::endl;
+
+    for(int i  = 0; i < numLayers - 1; i++){
+        std::normal_distribution<double> dist(net_dims[i+1],net_dims[i]);
+        params.W = Eigen::MatrixXd::Random(net_dims[i+1], net_dims[i]);
+        std::cout << "Params W" << i + 1 << ": " << "\n" << params.W.rows() << "," << params.W.cols() << std::endl;
+        params.b = Eigen::MatrixXd::Zero(net_dims[i + 1],1);
+        std::cout << "Params b" << i + 1 << ": " << "\n" << params.b.rows() << "," << params.b.cols() << std::endl;
+    }
+
+    return params;
+}
+
+std::pair<Eigen::MatrixXd, Eigen::MatrixXd> linear_forward(const Eigen::MatrixXd &A_prev, const parameters &params){
+    /*
+    Input A_prev propagates through the layer 
+    Z = WA + b is the output of this layer. 
+
+    Inputs: 
+        A_prev: numpy.ndarray (n,m) the input to the layer
+        W: numpy.ndarray (n_out, n) the weights of the layer
+        b: numpy.ndarray (n_out, 1) the bias of the layer
+
+    Outputs:
+        Z: where Z = W.A_prev + b, where Z is the numpy.ndarray (n_out, m) dimensions
+        cache: a dictionary containing the inputs A
+    */
+
+    Eigen::MatrixXd cache  = A_prev;
+
+    Eigen::MatrixXd Z = params.W * A_prev;
+    Z.colwise() += params.b;
+
+    return {Z, A_prev};
+}
 
 
-int main() {
+
+int main(int argc, char *argv[]) {
     // --- Setup hyperparameters and data dimensions ---
-    const double alpha = 0.04;
-    const int n_epochs = 4000;
+    std::vector<int> test_init;
+    for(int i = 1; i < argc; i ++){
+        test_init.push_back(atoi(argv[i]));
+    }
 
-    // Dimensions from the Pima dataset example in the notebook
-    const int d_features = 8;
-    const int m_train = 5000;
-    const int m_test = 26800;
+    parameters parameterTest = initialize_network(test_init);
 
-    // --- Create dummy data to simulate the notebook's data ---
-    // In a real application, you would load this from a file.
-    Eigen::MatrixXd X_train = Eigen::MatrixXd::Random(d_features, m_train);
-    Eigen::MatrixXd Y_train = (Eigen::MatrixXd::Random(1, m_train).array() > 0.5).cast<double>();
 
-    Eigen::MatrixXd X_test = Eigen::MatrixXd::Random(d_features, m_test);
-    Eigen::MatrixXd Y_test = (Eigen::MatrixXd::Random(1, m_test).array() > 0.5).cast<double>();
+    int n1 = 3;
+    int m1 = 4;
+    Eigen::MatrixXd A_prev_t = Eigen::MatrixXd::Random(n1,m1);
+    Eigen::MatrixXd W_t = Eigen::MatrixXd::Random(n1,n1);
+    Eigen::MatrixXd b_t = Eigen::MatrixXd::Random(n1,1);
+    parameters superTest;
+    superTest.b = b_t;
+    superTest.W = W_t;
 
-    // --- Step 1: Initialize parameters ---
-    // train_X.shape[0] in Python corresponds to train_X.rows() in Eigen
-    auto init_params = initialize(X_train.rows());
-    Eigen::MatrixXd w_init = init_params.first;
-    double b_init = init_params.second;
+    
+    std::pair<Eigen::MatrixXd, Eigen::MatrixXd> Z_est, cache_est = linear_forward(A_prev_t, superTest);
 
-    // --- Step 2: Fit the model ---
-    // We pass 'true' for the logging parameter to see the loss decrease during training.
-    TrainingResult training_output = model_fit(w_init, b_init, X_train, Y_train, alpha, n_epochs, true);
-    ModelParameters trained_params = training_output.params;
-    std::vector<double> losses = training_output.losses; // This vector holds the loss history for plotting
+    // std::cout << parameterTest.W << std::endl;
+    // std::cout << parameterTest.b << std::endl;
 
-    // --- Step 3: Predict and Evaluate ---
-    PredictionResult train_prediction = model_predict(trained_params, X_train, Y_train);
-    PredictionResult test_prediction = model_predict(trained_params, X_test, Y_test);
-
-    // --- Step 4: Print the final accuracies ---
-    std::cout << "\n--- Final Evaluation ---" << std::endl;
-    std::cout << "Train Accuracy of the model: " << train_prediction.accuracy * 100 << "%" << std::endl;
-    std::cout << "Test Accuracy of the model: " << test_prediction.accuracy * 100 << "%" << std::endl;
 
     return 0;
 }
