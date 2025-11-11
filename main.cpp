@@ -41,7 +41,7 @@ struct PredictionResult {
 //Struct to hold softmax cross entropy loss:
 struct SoftCrossEntropyLoss{
     Eigen::MatrixXd A;
-    Eigen::MatrixXd cache;
+    std::map<std::string, Eigen::MatrixXd> cache;
     double loss;
 };
 
@@ -439,10 +439,10 @@ PredictionResult model_predict(ModelParameters params, const Eigen::MatrixXd& X,
         A: where A = ReLU(Z) is a numpy.ndarray (n, m) representing 'm' samples each of 'n' dimension
         cache: a dictionary with {"Z", Z}
     */
-std::pair<Eigen::MatrixXd, Eigen::MatrixXd> relu(const Eigen::MatrixXd& Z){
+std::pair<Eigen::MatrixXd, std::map<std::string, Eigen::MatrixXd>> relu(const Eigen::MatrixXd& Z){
     Eigen::MatrixXd A = Z.cwiseMax(0.0);
-    Eigen::MatrixXd cache;
-    cache = Z;
+    std::map<std::string, Eigen::MatrixXd> cache;
+    cache["Z"] = Z;
     return {A, cache};
 }
 
@@ -460,8 +460,8 @@ std::pair<Eigen::MatrixXd, Eigen::MatrixXd> relu(const Eigen::MatrixXd& Z){
         dZ: the derivative of dimension (n,m). It is the elementwise 
             product of the derivative of ReLU and dA
     */
-Eigen::MatrixXd relu_der(const Eigen::MatrixXd& dA, const Eigen::MatrixXd& cache){
-    Eigen::MatrixXd Z = cache;
+Eigen::MatrixXd relu_der(const Eigen::MatrixXd& dA, const std::map<std::string, Eigen::MatrixXd>& cache){
+    Eigen::MatrixXd Z = cache.at("Z");
     Eigen::MatrixXd dZ = dA;
     dZ = dZ.array() * (Z.array() > 0).cast<double>();
     return dZ;
@@ -479,9 +479,10 @@ Eigen::MatrixXd relu_der(const Eigen::MatrixXd& dA, const Eigen::MatrixXd& cache
         A: where A = Linear(Z) is a numpy.ndarray (n, m) representing 'm' samples each of 'n' dimension
         cache: a dictionary with {"Z", Z}  
     */
-std::pair<Eigen::MatrixXd, Eigen::MatrixXd> linear(const Eigen::MatrixXd& Z){
+std::pair<Eigen::MatrixXd, std::map<std::string, Eigen::MatrixXd>> linear(const Eigen::MatrixXd& Z){
     Eigen::MatrixXd A = Z;
-    Eigen::MatrixXd cache = Z;
+    std::map<std::string, Eigen::MatrixXd> cache;
+    cache["Z"] = Z;
     return {A, cache};
 }
 
@@ -500,7 +501,7 @@ std::pair<Eigen::MatrixXd, Eigen::MatrixXd> linear(const Eigen::MatrixXd& Z){
         dZ: the derivative of dimension (n,m). It is the elementwise 
             product of the derivative of Linear(.) and dA
     */
-Eigen::MatrixXd linear_der(const Eigen::MatrixXd& dA,const Eigen::MatrixXd& cache){
+Eigen::MatrixXd linear_der(const Eigen::MatrixXd& dA,const std::map<std::string, Eigen::MatrixXd>& /*cache*/){
     Eigen::MatrixXd dZ = dA;
     return dZ;
 }
@@ -528,7 +529,7 @@ SoftCrossEntropyLoss softmax_cross_entropy_loss(const Eigen::MatrixXd& Z, const 
     Eigen::MatrixXd A = exp_Z.array().rowwise() / exp_Z.colwise().sum().array();
     SoftCrossEntropyLoss result;
     result.A = A;
-    result.cache = A;
+    result.cache["A"] = A;
     result.loss = 0.0;
 
     if(Y.size() > 0){
@@ -553,8 +554,8 @@ SoftCrossEntropyLoss softmax_cross_entropy_loss(const Eigen::MatrixXd& Z, const 
     Outputs:
         dZ: derivative dL/dZ - a numpy.ndarray of dimensions (n, m) 
     */
-Eigen::MatrixXd softmax_cross_entropy_loss_der(const Eigen::MatrixXd& Y, const Eigen::MatrixXd& cache){
-    Eigen::MatrixXd A = cache;
+Eigen::MatrixXd softmax_cross_entropy_loss_der(const Eigen::MatrixXd& Y, const std::map<std::string, Eigen::MatrixXd>& cache){
+    Eigen::MatrixXd A = cache.at("A");
     long m = Y.cols(); // number of samples
     Eigen::MatrixXd dZ = (A - Y) / m;
     return dZ;
@@ -625,12 +626,13 @@ parameters initialize_network(const std::vector<int>& net_dims) {
     return Z, cache
     
     */
-std::pair<Eigen::MatrixXd, Eigen::MatrixXd> linear_forward(const Eigen::MatrixXd &A_prev, const parameters &params){
-    Eigen::MatrixXd cache  = A_prev;
+std::pair<Eigen::MatrixXd, std::map<std::string, Eigen::MatrixXd>> linear_forward(const Eigen::MatrixXd &A_prev, const parameters &params){
+    std::map<std::string, Eigen::MatrixXd> cache;
+    cache["A"] = A_prev;
 
     Eigen::MatrixXd Z = (params.W * A_prev).colwise() + params.b.col(0);
 
-    return {Z, A_prev};
+    return {Z, cache};
 }
 
 // Layer Forward:
@@ -662,30 +664,30 @@ std::pair<Eigen::MatrixXd, Eigen::MatrixXd> linear_forward(const Eigen::MatrixXd
         
     */
 
-std::pair<Eigen::MatrixXd, Eigen::MatrixXd> layer_forward(const Eigen::MatrixXd &A_prev, const parameters &params, const std::string &activation){
+std::pair<Eigen::MatrixXd, std::map<std::string, Eigen::MatrixXd>> layer_forward(const Eigen::MatrixXd &A_prev, const parameters &params, const std::string &activation){
     auto linearForward = linear_forward(A_prev, params);
     Eigen::MatrixXd Z = linearForward.first;
-    Eigen::MatrixXd lin_cache = linearForward.second;
+    std::map<std::string, Eigen::MatrixXd> lin_cache = linearForward.second;
 
     Eigen::MatrixXd A;
-    Eigen::MatrixXd act_cache;
+    std::map<std::string, Eigen::MatrixXd> act_cache;
 
     if(activation == "relu"){
         auto reluForward = relu(Z);
         A = reluForward.first;
         act_cache = reluForward.second;
-        return {A, lin_cache};
     } else if(activation == "linear"){
         auto linearForwardAct = linear(Z);
         A = linearForwardAct.first;
         act_cache = linearForwardAct.second;
-        return {A, lin_cache};
     } else {
         throw std::invalid_argument("Unsupported activation function");
     }
 
-    Eigen::MatrixXd cache = lin_cache + act_cache;
-    
+    std::map<std::string, Eigen::MatrixXd> cache;
+    cache["lin_cache"] = lin_cache.at("A");
+    // act_cache contains key "Z"
+    cache["act_cache"] = act_cache.at("Z");
 
     return {A, cache};
 }
@@ -715,15 +717,15 @@ std::pair<Eigen::MatrixXd, Eigen::MatrixXd> layer_forward(const Eigen::MatrixXd 
     caches.append(cache)
     return AL, caches
     */
-std::pair<Eigen::MatrixXd, std::vector<Eigen::MatrixXd>> multi_layer_forward(const Eigen::MatrixXd &A0, const parameters &params){
+std::pair<Eigen::MatrixXd, std::vector<std::map<std::string, Eigen::MatrixXd>>> multi_layer_forward(const Eigen::MatrixXd &A0, const parameters &params){
     int L = params.W.rows(); // Number of layers
     Eigen::MatrixXd A = A0;
-    std::vector<Eigen::MatrixXd> caches;
+    std::vector<std::map<std::string, Eigen::MatrixXd>> caches;
 
     for(int l = 1; l < L; l++){
         auto layerForward = layer_forward(A, params, "relu");
         A = layerForward.first;
-        Eigen::MatrixXd cache = layerForward.second;
+        std::map<std::string, Eigen::MatrixXd> cache = layerForward.second;
         caches.push_back(cache);
     }
     auto layerForward = layer_forward(A, params, "linear");
@@ -773,7 +775,7 @@ struct BackwardResult {
     Eigen::MatrixXd db;
 };
 BackwardResult linear_backward(const Eigen::MatrixXd& dZ, const Eigen::MatrixXd& cache, const parameters& params){
-    Eigen::MatrixXd A = cache;
+    Eigen::MatrixXd A = cache; // linear_backward still expects the linear cache as a matrix (A)
 
     // Compute dA_prev
     Eigen::MatrixXd dA_prev = params.W.transpose() * dZ;
@@ -821,17 +823,22 @@ BackwardResult linear_backward(const Eigen::MatrixXd& dZ, const Eigen::MatrixXd&
     return dA_prev, dW, db
 */
 
-BackwardResult layer_backward(const Eigen::MatrixXd& dA, const Eigen::MatrixXd& cache, const parameters& params, const std::string& activation){
-    // Seperate lin_cache and act_cache from cache
+BackwardResult layer_backward(const Eigen::MatrixXd& dA, const std::map<std::string, Eigen::MatrixXd>& cache, const parameters& params, const std::string& activation){
+    // Separate lin_cache and act_cache from cache
 
-    Eigen::MatrixXd lin_cache = cache; 
-    Eigen::MatrixXd act_cache = cache; 
+    Eigen::MatrixXd lin_cache = cache.at("lin_cache"); 
+    Eigen::MatrixXd act_cache = cache.at("act_cache"); 
 
     Eigen::MatrixXd dZ;
     if(activation == "relu"){
-        dZ = relu_der(dA, act_cache);
+        // relu_der expects a map with key "Z"
+        std::map<std::string, Eigen::MatrixXd> act_cache_map;
+        act_cache_map["Z"] = act_cache;
+        dZ = relu_der(dA, act_cache_map);
     } else if(activation == "linear"){
-        dZ = linear_der(dA, act_cache);
+        std::map<std::string, Eigen::MatrixXd> act_cache_map;
+        act_cache_map["Z"] = act_cache;
+        dZ = linear_der(dA, act_cache_map);
     } else {
         throw std::invalid_argument("Unsupported activation function");
     }
@@ -871,7 +878,7 @@ BackwardResult layer_backward(const Eigen::MatrixXd& dA, const Eigen::MatrixXd& 
     return gradients
 */
 
-std::map<std::string, Eigen::MatrixXd> multi_layer_backward(const Eigen::MatrixXd& dAL, const std::vector<Eigen::MatrixXd>& caches, const parameters& params){
+std::map<std::string, Eigen::MatrixXd> multi_layer_backward(const Eigen::MatrixXd& dAL, const std::vector<std::map<std::string, Eigen::MatrixXd>>& caches, const parameters& params){
     int L = caches.size();
     std::map<std::string, Eigen::MatrixXd> gradients;
     Eigen::MatrixXd dA = dAL;
@@ -970,6 +977,112 @@ std::map<std::string, Eigen::MatrixXd> update_parameters(const std::map<std::str
     return updated_params;
 }
 
+// Neural Network:
+/*
+    '''
+    Creates the multilayer network and trains the network
+
+    Inputs:
+        X: numpy.ndarray (n,m) of training data
+        Y: numpy.ndarray (1,m) of training data labels
+        net_dims: tuple of layer dimensions
+        num_iterations: num of epochs to train
+        learning_rate: step size for gradient descent
+        log: boolean to print training progression 
+    
+    Outputs:
+        costs: list of costs (or loss) over training
+        parameters: dictionary of trained network parameters
+    '''
+
+    parameters = initialize_network(net_dims)
+    A0 = X
+    costs = []
+    num_classes = 10
+    alpha = learning_rate
+    prev_parameter = None
+    for ii in range(num_iterations):
+        
+        ## Forward Propagation
+        # Step 1: Input 'A0' and 'parameters' into the network using multi_layer_forward()
+        #         and calculate output of last layer 'A' (before softmax) and obtain cached activations as 'caches'
+        # Step 2: Input 'A' and groundtruth labels 'Y' to softmax_cros_entropy_loss(.) and estimate
+        #         activations 'AL', 'softmax_cache' and 'loss'
+        
+        ## Back Propagation
+        # Step 3: Estimate gradient 'dAL' with softmax_cros_entropy_loss_der(.) using groundtruth 
+        #         labels 'Y' and 'softmax_cache' 
+        # Step 4: Estimate 'gradients' with multi_layer_backward(.) using 'dAL' and 'parameters' 
+        # Step 5: Estimate updated 'parameters' and updated learning rate 'alpha' with update_parameters(.) 
+        #         using 'parameters', 'gradients', loop variable 'ii' (epoch number) and 'learning_rate'
+        #         Note: Use the same variable 'parameters' as input and output to the update_parameters(.) function
+        
+        # your code here
+
+        #Step 1:
+        A, caches = multi_layer_forward(A0, parameters)
+        #Step 2:
+        AL, softmax_cache, loss = softmax_cross_entropy_loss(A, Y)
+        #Step 3:
+        dAL = softmax_cross_entropy_loss_der(Y, softmax_cache)
+        #Step 4:
+        gradients = multi_layer_backward(dAL, caches, parameters)
+        #Step 5: 
+        parameters = update_parameters(parameters, gradients, ii, learning_rate)
+        
+
+        if ii % 20 == 0:
+            costs.append(loss)
+            if log:
+                print("Cost at iteration %i is: %.05f, learning rate: %.05f" %(ii+1, cost, learning_rate))
+    
+    return costs, parameters
+}*/
+struct NeuralNetworkResult {
+    std::vector<double> costs;
+    parameters params;
+};
+
+NeuralNetworkResult multi_layer_network(const Eigen::MatrixXd& X, const Eigen::MatrixXd& Y, const std::vector<int>& net_dims, int num_iterations, double learning_rate, bool log = false){
+    parameters params = initialize_network(net_dims);
+    Eigen::MatrixXd A0 = X;
+    std::vector<double> costs;
+
+    for(int ii = 0; ii < num_iterations; ii++){
+        // Step 1:
+        auto forwardResult = multi_layer_forward(A0, params);
+        Eigen::MatrixXd A = forwardResult.first;
+        std::vector<std::map<std::string, Eigen::MatrixXd>> caches = forwardResult.second;
+
+        // Step 2:
+        SoftCrossEntropyLoss softmaxResult = softmax_cross_entropy_loss(A, Y);
+        Eigen::MatrixXd AL = softmaxResult.A;
+        std::map<std::string, Eigen::MatrixXd> softmax_cache = softmaxResult.cache;
+        double loss = softmaxResult.loss;
+
+        // Step 3:
+        Eigen::MatrixXd dAL = softmax_cross_entropy_loss_der(Y, softmax_cache);
+
+        // Step 4:
+        std::map<std::string, Eigen::MatrixXd> gradients = multi_layer_backward(dAL, caches, params);
+
+        // Step 5:
+        std::map<std::string, Eigen::MatrixXd> params_map;
+        params_map = update_parameters(params_map, gradients, ii, learning_rate);
+        if(ii % 20 == 0){
+            costs.push_back(loss);
+            if(log){
+                std::cout << "Cost at iteration " << ii + 1 << " is: " << loss << ", learning rate: " << learning_rate << std::endl;
+            }
+        }
+    }
+
+    NeuralNetworkResult result;
+    result.costs = costs;
+    result.params = params;
+
+    return result;
+}
 
 
 
@@ -986,20 +1099,15 @@ int main(int argc, char *argv[]) {
         test_init.push_back(atoi(argv[i]));
     }
 
+    std::vector<int> net_dims = {784, 1568, 392, 10};
 
-    // Test Linear Forward:
-    int n1 = 3;
-    int m1 = 4;
-    int p1 = 5;
-    Eigen::MatrixXd dZ_t = Eigen::MatrixXd::Random(n1, m1);
-    Eigen::MatrixXd A_t = Eigen::MatrixXd::Random(p1, m1);
-    parameters params_t;
-    params_t.W = Eigen::MatrixXd::Random(n1, p1);
-    params_t.b = Eigen::MatrixXd::Random(n1, 1);
-    BackwardResult backTest = linear_backward(dZ_t, A_t, params_t);
-    std::cout << "Backward Test dA_prev: " << "\n" << backTest.dA_prev << std::endl;
-    std::cout << "Backward Test dW: " << "\n" << backTest.dW << std::endl;
-    std::cout << "Backward Test db: " << "\n" << backTest.db << std::endl;
+    //init learning rate and iterations 
+    double learning_rate = 0.15;
+    int num_iterations = 250;
+
+    // Load mnist data into trainX, trainY, testX, testY:
+
+
 
     return 0;
 }
