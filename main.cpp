@@ -45,6 +45,9 @@ struct SoftCrossEntropyLoss{
     double loss;
 };
 
+//Parameters:
+using ParameterMap = std::map<std::string, Eigen::MatrixXd>;
+
 
 // --------------- Functions ----------------- //
 
@@ -561,10 +564,6 @@ Eigen::MatrixXd softmax_cross_entropy_loss_der(const Eigen::MatrixXd& Y, const s
     return dZ;
 }
 
-struct parameters {
-    Eigen::MatrixXd W;
-    Eigen::MatrixXd b;
-};
 
 // Init multi-layer NN:
     /*
@@ -586,20 +585,20 @@ struct parameters {
 
     return parameters
     */
-parameters initialize_network(const std::vector<int>& net_dims) {
+ParameterMap initialize_network(const std::vector<int>& net_dims) {
     std::mt19937 gen(42);
     
 
     int numLayers = net_dims.size();
-    parameters params;
+    ParameterMap params;
     //std::cout << numLayers << std::endl;
 
     for(int i  = 0; i < numLayers - 1; i++){
         std::normal_distribution<double> dist(net_dims[i+1],net_dims[i]);
-        params.W = Eigen::MatrixXd::Random(net_dims[i+1], net_dims[i]);
-        std::cout << "Params W" << i + 1 << ": " << "\n" << params.W.rows() << "," << params.W.cols() << std::endl;
-        params.b = Eigen::MatrixXd::Zero(net_dims[i + 1],1);
-        std::cout << "Params b" << i + 1 << ": " << "\n" << params.b.rows() << "," << params.b.cols() << std::endl;
+        params["W" + std::to_string(i + 1)] = Eigen::MatrixXd::Random(net_dims[i+1], net_dims[i]) * 0.01;
+        std::cout << "Params W" << i + 1 << ": " << "\n" << params["W" + std::to_string(i + 1)].rows() << "," << params["W" + std::to_string(i + 1)].cols() << std::endl;
+        params["b" + std::to_string(i + 1)] = Eigen::MatrixXd::Zero(net_dims[i + 1],1);
+        std::cout << "Params b" << i + 1 << ": " << "\n" << params["b" + std::to_string(i + 1)].rows() << "," << params["b" + std::to_string(i + 1)].cols() << std::endl;
     }
 
     return params;
@@ -626,12 +625,11 @@ parameters initialize_network(const std::vector<int>& net_dims) {
     return Z, cache
     
     */
-std::pair<Eigen::MatrixXd, std::map<std::string, Eigen::MatrixXd>> linear_forward(const Eigen::MatrixXd &A_prev, const parameters &params){
+std::pair<Eigen::MatrixXd, std::map<std::string, Eigen::MatrixXd>> linear_forward(const Eigen::MatrixXd &A_prev, const Eigen::MatrixXd &W, const Eigen::MatrixXd &b){
     std::map<std::string, Eigen::MatrixXd> cache;
     cache["A"] = A_prev;
 
-    Eigen::MatrixXd Z = (params.W * A_prev).colwise() + params.b.col(0);
-
+    Eigen::MatrixXd Z = (W * A_prev).colwise() + b.col(0);
     return {Z, cache};
 }
 
@@ -664,8 +662,8 @@ std::pair<Eigen::MatrixXd, std::map<std::string, Eigen::MatrixXd>> linear_forwar
         
     */
 
-std::pair<Eigen::MatrixXd, std::map<std::string, Eigen::MatrixXd>> layer_forward(const Eigen::MatrixXd &A_prev, const parameters &params, const std::string &activation){
-    auto linearForward = linear_forward(A_prev, params);
+std::pair<Eigen::MatrixXd, std::map<std::string, Eigen::MatrixXd>> layer_forward(const Eigen::MatrixXd &A_prev, const Eigen::MatrixXd &W, const Eigen::MatrixXd &b, const std::string &activation){
+    auto linearForward = linear_forward(A_prev, W, b);
     Eigen::MatrixXd Z = linearForward.first;
     std::map<std::string, Eigen::MatrixXd> lin_cache = linearForward.second;
 
@@ -717,18 +715,21 @@ std::pair<Eigen::MatrixXd, std::map<std::string, Eigen::MatrixXd>> layer_forward
     caches.append(cache)
     return AL, caches
     */
-std::pair<Eigen::MatrixXd, std::vector<std::map<std::string, Eigen::MatrixXd>>> multi_layer_forward(const Eigen::MatrixXd &A0, const parameters &params){
-    int L = params.W.rows(); // Number of layers
+std::pair<Eigen::MatrixXd, std::vector<std::map<std::string, Eigen::MatrixXd>>> multi_layer_forward(const Eigen::MatrixXd &A0, const ParameterMap &params){
+    int L = params.size() / 2; // Number of layers
     Eigen::MatrixXd A = A0;
     std::vector<std::map<std::string, Eigen::MatrixXd>> caches;
 
     for(int l = 1; l < L; l++){
-        auto layerForward = layer_forward(A, params, "relu");
+        auto& Wl = params.at("W" + std::to_string(l));
+        auto& bl = params.at("b" + std::to_string(l));
+        auto layerForward = layer_forward(A, Wl, bl, "relu");
         A = layerForward.first;
-        std::map<std::string, Eigen::MatrixXd> cache = layerForward.second;
-        caches.push_back(cache);
+        caches.push_back(layerForward.second);
     }
-    auto layerForward = layer_forward(A, params, "linear");
+    auto& WL = params.at("W" + std::to_string(L));
+    auto& bL = params.at("b" + std::to_string(L));
+    auto layerForward = layer_forward(A, WL, bL, "linear");
     Eigen::MatrixXd AL = layerForward.first;
     caches.push_back(layerForward.second);
 
@@ -774,11 +775,11 @@ struct BackwardResult {
     Eigen::MatrixXd dW;
     Eigen::MatrixXd db;
 };
-BackwardResult linear_backward(const Eigen::MatrixXd& dZ, const Eigen::MatrixXd& cache, const parameters& params){
+BackwardResult linear_backward(const Eigen::MatrixXd& dZ, const Eigen::MatrixXd& cache,const Eigen::MatrixXd &W, const Eigen::MatrixXd &b){
     Eigen::MatrixXd A = cache; // linear_backward still expects the linear cache as a matrix (A)
 
     // Compute dA_prev
-    Eigen::MatrixXd dA_prev = params.W.transpose() * dZ;
+    Eigen::MatrixXd dA_prev =W.transpose() * dZ;
 
     // Compute dW
     Eigen::MatrixXd dW = (dZ * A.transpose());
@@ -823,7 +824,7 @@ BackwardResult linear_backward(const Eigen::MatrixXd& dZ, const Eigen::MatrixXd&
     return dA_prev, dW, db
 */
 
-BackwardResult layer_backward(const Eigen::MatrixXd& dA, const std::map<std::string, Eigen::MatrixXd>& cache, const parameters& params, const std::string& activation){
+BackwardResult layer_backward(const Eigen::MatrixXd& dA, const std::map<std::string, Eigen::MatrixXd>& cache, const Eigen::MatrixXd &W, const Eigen::MatrixXd &b, const std::string& activation){
     // Separate lin_cache and act_cache from cache
 
     Eigen::MatrixXd lin_cache = cache.at("lin_cache"); 
@@ -843,7 +844,7 @@ BackwardResult layer_backward(const Eigen::MatrixXd& dA, const std::map<std::str
         throw std::invalid_argument("Unsupported activation function");
     }
 
-    BackwardResult backResult = linear_backward(dZ, lin_cache, params);
+    BackwardResult backResult = linear_backward(dZ, lin_cache, W, b);
 
     return backResult;
 }
@@ -878,14 +879,16 @@ BackwardResult layer_backward(const Eigen::MatrixXd& dA, const std::map<std::str
     return gradients
 */
 
-std::map<std::string, Eigen::MatrixXd> multi_layer_backward(const Eigen::MatrixXd& dAL, const std::vector<std::map<std::string, Eigen::MatrixXd>>& caches, const parameters& params){
+std::map<std::string, Eigen::MatrixXd> multi_layer_backward(const Eigen::MatrixXd& dAL, const std::vector<std::map<std::string, Eigen::MatrixXd>>& caches, const ParameterMap &params){
     int L = caches.size();
     std::map<std::string, Eigen::MatrixXd> gradients;
     Eigen::MatrixXd dA = dAL;
     std::string activation = "linear";
 
     for(int l = L; l >= 1; l--){
-        BackwardResult backResult = layer_backward(dA, caches[l - 1], params, activation);
+        const auto& Wl = params.at("W" + std::to_string(l));
+        const auto& bl = params.at("b" + std::to_string(l));
+        BackwardResult backResult = layer_backward(dA, caches[l - 1], Wl, bl, activation);
         dA = backResult.dA_prev;
         gradients["dW" + std::to_string(l)] = backResult.dW;
         gradients["db" + std::to_string(l)] = backResult.db;
@@ -922,7 +925,7 @@ std::map<std::string, Eigen::MatrixXd> multi_layer_backward(const Eigen::MatrixX
     return YPred
 */
 
-std::vector<double> classify(const Eigen::MatrixXd& X, const parameters& params){
+std::vector<double> classify(const Eigen::MatrixXd& X, const ParameterMap &params){
     auto forwardResult = multi_layer_forward(X, params);
     Eigen::MatrixXd A = forwardResult.first;
 
@@ -931,7 +934,9 @@ std::vector<double> classify(const Eigen::MatrixXd& X, const parameters& params)
 
     std::vector<double> YPred(AL.cols());
     for(int i = 0; i < AL.cols(); i++){
-        AL.col(i).maxCoeff(&YPred[i]);
+        Eigen::Index index;
+        AL.col(i).maxCoeff(&index);
+        YPred[i] = static_cast<double>(index);
     }
 
     return YPred;
@@ -1040,11 +1045,11 @@ std::map<std::string, Eigen::MatrixXd> update_parameters(const std::map<std::str
 }*/
 struct NeuralNetworkResult {
     std::vector<double> costs;
-    parameters params;
+    ParameterMap params;
 };
 
 NeuralNetworkResult multi_layer_network(const Eigen::MatrixXd& X, const Eigen::MatrixXd& Y, const std::vector<int>& net_dims, int num_iterations, double learning_rate, bool log = false){
-    parameters params = initialize_network(net_dims);
+    ParameterMap params = initialize_network(net_dims);
     Eigen::MatrixXd A0 = X;
     std::vector<double> costs;
 
@@ -1067,8 +1072,7 @@ NeuralNetworkResult multi_layer_network(const Eigen::MatrixXd& X, const Eigen::M
         std::map<std::string, Eigen::MatrixXd> gradients = multi_layer_backward(dAL, caches, params);
 
         // Step 5:
-        std::map<std::string, Eigen::MatrixXd> params_map;
-        params_map = update_parameters(params_map, gradients, ii, learning_rate);
+        params = update_parameters(params, gradients, ii, learning_rate);
         if(ii % 20 == 0){
             costs.push_back(loss);
             if(log){
@@ -1084,22 +1088,24 @@ NeuralNetworkResult multi_layer_network(const Eigen::MatrixXd& X, const Eigen::M
     return result;
 }
 
+Eigen::MatrixXd one_hot_encode(const Eigen::MatrixXd& Y, int num_classes) {
+    long m = Y.cols(); // Number of samples
+    Eigen::MatrixXd Y_onehot = Eigen::MatrixXd::Zero(num_classes, m);
+    for (long i = 0; i < m; ++i) {
+        int class_index = static_cast<int>(Y(0, i));
+        if (class_index >= 0 && class_index < num_classes) {
+            Y_onehot(class_index, i) = 1.0;
+        }
+    }
+    return Y_onehot;
+}
 
 
 
 
 int main(int argc, char *argv[]) {
-    // __________TODO___________ //
-    // Convert all caches to maps
-
-
-    // --- Setup hyperparameters and data dimensions ---
-    std::vector<int> test_init;
-    for(int i = 1; i < argc; i ++){
-        test_init.push_back(atoi(argv[i]));
-    }
-
-    std::vector<int> net_dims = {784, 1568, 392, 10};
+    // Define network dimensions
+    std::vector<int> net_dims = {784, 10};
 
     //init learning rate and iterations 
     double learning_rate = 0.15;
@@ -1107,7 +1113,121 @@ int main(int argc, char *argv[]) {
 
     // Load mnist data into trainX, trainY, testX, testY:
 
+    // small helper to read big-endian ints from IDX files
+    auto read_int32_be = [](std::ifstream &ifs)->int {
+        unsigned char bytes[4];
+        ifs.read(reinterpret_cast<char*>(bytes), 4);
+        return (int)((bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3]);
+    };
+
+    // load images: returns matrix of shape (rows*cols, num_images) normalized to [0,1]
+    auto load_mnist_images = [&](const std::string &path)->Eigen::MatrixXd {
+        std::ifstream ifs(path, std::ios::binary);
+        if(!ifs.is_open()){
+            std::cerr << "Unable to open images file: " << path << std::endl;
+            return Eigen::MatrixXd();
+        }
+        int magic = read_int32_be(ifs);
+        int num_images = read_int32_be(ifs);
+        int rows = read_int32_be(ifs);
+        int cols = read_int32_be(ifs);
+        int img_size = rows * cols;
+        Eigen::MatrixXd images(img_size, num_images);
+        for(int i = 0; i < num_images; ++i){
+            std::vector<unsigned char> buffer(img_size);
+            ifs.read(reinterpret_cast<char*>(buffer.data()), img_size);
+            for(int j = 0; j < img_size; ++j){
+                images(j, i) = static_cast<double>(buffer[j]) / 255.0;
+            }
+        }
+        return images;
+    };
+
+    // load labels: returns (1, num_items) matrix of label values
+    auto load_mnist_labels = [&](const std::string &path)->Eigen::MatrixXd {
+        std::ifstream ifs(path, std::ios::binary);
+        if(!ifs.is_open()){
+            std::cerr << "Unable to open labels file: " << path << std::endl;
+            return Eigen::MatrixXd();
+        }
+        int magic = read_int32_be(ifs);
+        int num_items = read_int32_be(ifs);
+        Eigen::MatrixXd labels(1, num_items);
+        for(int i = 0; i < num_items; ++i){
+            unsigned char val = 0;
+            ifs.read(reinterpret_cast<char*>(&val), 1);
+            labels(0, i) = static_cast<double>(val);
+        }
+        return labels;
+    };
+
+    // filter X,Y to only include two digits (a and b). labels mapped to 0 (a) and 1 (b)
+    auto filter_digits = [&](const Eigen::MatrixXd &X, const Eigen::MatrixXd &labels, int a, int b, Eigen::MatrixXd &X_out, Eigen::MatrixXd &Y_out){
+        std::vector<int> keep;
+        for(int i = 0; i < labels.cols(); ++i){
+            int lab = static_cast<int>(labels(0,i));
+            if(lab == a || lab == b) keep.push_back(i);
+        }
+        X_out.resize(X.rows(), keep.size());
+        Y_out.resize(1, keep.size());
+        for(size_t i = 0; i < keep.size(); ++i){
+            X_out.col(i) = X.col(keep[i]);
+            int lab = static_cast<int>(labels(0,keep[i]));
+            Y_out(0,i) = (lab == a) ? 0.0 : 1.0;
+        }
+    };
+
+    // Determine file paths (argv precedence)
+    std::string train_images = (argc > 1) ? argv[1] : "train-images.idx3-ubyte";
+    std::string train_labels = (argc > 2) ? argv[2] : "train-labels.idx1-ubyte";
+    std::string test_images = (argc > 3) ? argv[3] : "t10k-images.idx3-ubyte";
+    std::string test_labels = (argc > 4) ? argv[4] : "t10k-labels.idx1-ubyte";
+
+    std::cout << "Loading training images from: " << train_images << std::endl;
+    Eigen::MatrixXd trainX = load_mnist_images(train_images);
+    Eigen::MatrixXd trainY = load_mnist_labels(train_labels);
+    std::cout << "Loading test images from: " << test_images << std::endl;
+    Eigen::MatrixXd testX = load_mnist_images(test_images);
+    Eigen::MatrixXd testY = load_mnist_labels(test_labels);
+
+    if(trainX.size() == 0 || trainY.size() == 0){
+        std::cerr << "Failed to load training data. Exiting." << std::endl;
+        return 1;
+    }
 
 
+
+
+    // optionally subsample for speed if dataset large
+    int max_train = 2500;
+    if(trainX.cols() > max_train){
+        Eigen::MatrixXd Xsub = trainX.leftCols(max_train);
+        Eigen::MatrixXd Ysub = trainY.leftCols(max_train);
+        trainX = Xsub; trainY = Ysub;
+    }
+
+    // Train multi-layer network
+    std::cout << "Training multi-layer neural network..." << std::endl;
+    
+    // Add multi-layer network training code here
+    Eigen::MatrixXd trainY_onehot = one_hot_encode(trainY, 10);
+    NeuralNetworkResult nnResult = multi_layer_network(trainX, trainY_onehot, net_dims, num_iterations, learning_rate, true);
+    ParameterMap trainedParams = nnResult.params;
+    std::cout << "Training complete." << std::endl;
+    // Evaluate on test set
+    std::cout << "Evaluating on test set..." << std::endl;
+    std::vector<double> testPreds = classify(testX, trainedParams);
+    int correct = 0;
+    for(int i = 0; i < testY.cols(); ++i){
+        if(static_cast<int>(testY(0,i)) == static_cast<int>(testPreds[i])){
+            correct++;
+        }
+    }
+    double testAccuracy = static_cast<double>(correct) / testY.cols();
+    std::cout << "Test set accuracy: " << testAccuracy * 100.0 << "%" << std::endl;
+
+    
     return 0;
 }
+
+
